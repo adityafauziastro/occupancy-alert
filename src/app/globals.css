@@ -1,0 +1,79 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&family=Inconsolata:wght@400;600;700&display=swap");
+@import "tailwindcss";
+
+/* ============================================================
+   FIT Design System v2 — arsitektur token 3 lapis
+   1) Primitif  : palet mentah (—p-*)
+   2) Semantik  : peran warna/tipografi (—color-fit-*)
+   3) Komponen  : utilitas siap pakai (.fit-card, .fit-chip, dst)
+   ============================================================ */
+@theme {
+  /* — Lapis 1 · Primitif — */
+  --p-blue-500: #3c83f6;
+  --p-blue-600: #2563eb;
+  --p-blue-050: #eef4fe;
+  --p-plum-900: #45112a;
+  --p-plum-700: #6b1f44;
+  --p-ink-900: #0f172a;
+  --p-slate-050: #f5f7fb;
+  --p-green-600: #0e9f6e;
+  --p-amber-700: #b45309;
+  --p-red-600: #dc2626;
+  --p-violet-700: #7c2d8f;
+
+  /* — Lapis 2 · Semantik — */
+  --color-fit-blue: var(--p-blue-500);
+  --color-fit-blue-dark: var(--p-blue-600);
+  --color-fit-blue-soft: var(--p-blue-050);
+  --color-fit-plum: var(--p-plum-900);
+  --color-fit-plum-soft: var(--p-plum-700);
+  --color-fit-ink: var(--p-ink-900);
+  --color-fit-bg: var(--p-slate-050);
+  --color-fit-ok: var(--p-green-600);
+  --color-fit-warn: var(--p-amber-700);
+  --color-fit-crit: var(--p-red-600);
+  --color-fit-over: var(--p-violet-700);
+
+  --font-display: "Poppins", system-ui, sans-serif;
+  --font-body: "Nunito Sans", system-ui, sans-serif;
+  --font-mono-fit: "Inconsolata", ui-monospace, monospace;
+
+  --radius-fit: 1rem;
+  --shadow-fit: 0 1px 2px rgb(15 23 42 / 0.05), 0 8px 24px -12px rgb(15 23 42 / 0.12);
+}
+
+html { font-family: var(--font-body); }
+
+body {
+  background:
+    radial-gradient(60rem 24rem at 110% -10%, color-mix(in srgb, var(--p-blue-500) 7%, transparent), transparent),
+    var(--color-fit-bg);
+  color: var(--color-fit-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: color-mix(in srgb, var(--p-blue-500) 22%, transparent); }
+
+/* — Lapis 3 · Komponen — */
+.fit-card {
+  background: #fff;
+  border-radius: var(--radius-fit);
+  box-shadow: var(--shadow-fit);
+  outline: 1px solid rgb(226 232 240 / 0.8);
+  outline-offset: -1px;
+}
+
+.fit-focus:focus-visible {
+  outline: 2px solid var(--p-blue-500);
+  outline-offset: 2px;
+}
+
+.thin-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
