@@ -115,5 +115,3 @@ Angka bersufiks SI dari Superset (`6.91k`, `576µ`, `13.4m`) diparse dengan bena
 - Data & cookie tidak pernah meninggalkan mesin Anda (proxy berjalan lokal; tanpa telemetri, tanpa pihak ketiga).
 - Data terikat ke browser+perangkat tempat impor dilakukan; pengguna lain mengimpor ekspornya sendiri.
 - Menghapus site data browser akan menghapus data OAS — cukup impor ulang ekspor terakhir.
-#   o c c u p a n c y - a l e r t  
- 

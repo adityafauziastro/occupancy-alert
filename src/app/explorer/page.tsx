@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { useApp, useDbQuery } from "@/lib/store";
 import type { OccRow, StockRow } from "@/lib/config";
@@ -23,7 +24,7 @@ import {
 const PAGE = 50;
 type SortKey = "pct" | "occupied_cbm" | "capacity_cbm" | "sku_count" | "rack_name";
 
-export default function ExplorerPage() {
+function ExplorerInner() {
   const { cfg } = useApp();
   const [wh, setWh] = useState("ALL");
   const [zone, setZone] = useState("ALL");
@@ -35,6 +36,15 @@ export default function ExplorerPage() {
   const [dir, setDir] = useState<1 | -1>(-1);
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<OccRow | null>(null);
+  const params = useSearchParams();
+  useEffect(() => {
+    const qwh = params.get("wh");
+    const qzone = params.get("zone");
+    if (qwh) setWh(qwh);
+    if (qzone) { setZone(qzone); setPage(0); }
+    // hanya sekali saat mount dari deep-link
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { data: allRows } = useDbQuery(async () => {
     const db = getDb();
@@ -299,5 +309,13 @@ function MiniStat({ label, value, warn }: { label: string; value: string; warn?:
       <div className={`text-[10px] font-bold uppercase tracking-wide ${warn ? "text-rose-500" : "text-slate-400"}`}>{label}</div>
       <div className={`font-mono-fit text-sm font-bold ${warn ? "text-rose-700" : "text-fit-ink"}`}>{value}</div>
     </div>
+  );
+}
+
+export default function ExplorerPage() {
+  return (
+    <Suspense fallback={null}>
+      <ExplorerInner />
+    </Suspense>
   );
 }

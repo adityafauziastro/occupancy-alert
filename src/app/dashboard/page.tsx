@@ -9,11 +9,12 @@ import type { OccRow, SnapshotRow } from "@/lib/config";
 import { HANDLING_LABEL, STATUS_META, isDimOver } from "@/lib/config";
 import { fmtCbm, fmtInt, fmtPct } from "@/lib/format";
 import { DoughnutChart, ParetoChart, SparkLine, StackedBarChart } from "@/components/charts";
-import { Btn, Card, CardHeader, EmptyState, FillMeter, StatusBadge } from "@/components/ui";
+import { Btn, Card, CardHeader, EmptyState, FillMeter, Modal, StatusBadge } from "@/components/ui";
 
 export default function DashboardPage() {
   const { cfg } = useApp();
   const [wh, setWh] = useState("ALL");
+  const [heatSel, setHeatSel] = useState<{ zone: string; wh: string } | null>(null);
 
   const { data: kpis } = useDbQuery(() => getMeta<Kpis>("kpis"), []);
   const { data: catByWh } = useDbQuery(
@@ -64,28 +65,38 @@ export default function DashboardPage() {
     };
   }, [rows, cfg]);
 
-  // ---- Heatmap zona × gudang ----
+  // ---- Heatmap zona × gudang (diperkaya: volume, kritis, agregat baris/kolom) ----
   const heat = useMemo(() => {
     const src = occRows || [];
     const whs = Array.from(new Set(src.map((r) => r.wh))).sort();
-    const zMap = new Map<string, Map<string, { s: number; n: number }>>();
+    const zMap = new Map<string, Map<string, HeatCellData>>();
+    const colTot = new Map<string, { s: number; n: number }>();
     for (const r of src) {
+      if (!r.zone) continue;
       let z = zMap.get(r.zone);
       if (!z) { z = new Map(); zMap.set(r.zone, z); }
-      const c = z.get(r.wh) || { s: 0, n: 0 };
-      c.s += r.pct; c.n++;
+      const c = z.get(r.wh) || { pctSum: 0, n: 0, occ: 0, crit: 0 };
+      c.pctSum += r.pct; c.n++; c.occ += r.occupied_cbm;
+      if (r.status === "CRITICAL" || r.status === "OVERLOAD") c.crit++;
       z.set(r.wh, c);
+      const ct = colTot.get(r.wh) || { s: 0, n: 0 };
+      ct.s += r.pct; ct.n++; colTot.set(r.wh, ct);
     }
     const zones = Array.from(zMap.entries())
       .map(([zone, m]) => {
-        const tot = Array.from(m.values()).reduce((a, c) => a + c.n, 0);
-        const worst = Math.max(...Array.from(m.values()).map((c) => c.s / c.n));
-        return { zone, m, tot, worst };
+        const vals = Array.from(m.values());
+        const tot = vals.reduce((a, c) => a + c.n, 0);
+        const avg = vals.reduce((a, c) => a + c.pctSum, 0) / Math.max(1, tot);
+        const worst = Math.max(...vals.map((c) => c.pctSum / c.n));
+        const crit = vals.reduce((a, c) => a + c.crit, 0);
+        return { zone, m, tot, avg, worst, crit };
       })
-      .filter((z) => z.tot >= 2 && z.zone)
+      .filter((z) => z.tot >= 2)
       .sort((a, b) => b.worst - a.worst)
       .slice(0, 12);
-    return { whs, zones };
+    const colAvg = new Map<string, number>();
+    for (const [w, c] of colTot) colAvg.set(w, c.s / Math.max(1, c.n));
+    return { whs, zones, colAvg };
   }, [occRows]);
 
   const topCrit = useMemo(
@@ -218,33 +229,89 @@ export default function DashboardPage() {
 
       {/* ===== Heatmap zona × gudang ===== */}
       <Card>
-        <CardHeader title="Peta Panas Zona × Gudang" subtitle="Rata-rata okupansi — merah = padat, ungu = overload" />
+        <CardHeader
+          title="Peta Panas Zona × Gudang"
+          subtitle="Tiap sel = rata-rata okupansi zona itu. Arahkan kursor untuk detail, klik untuk lihat SLOC-nya."
+          right={
+            <div className="hidden items-center gap-2 sm:flex">
+              {[
+                ["#E7F0FE", "#1D4ED8", "<75"],
+                ["#FEF3C7", "#92400E", "75–90"],
+                ["#FEE2E2", "#B91C1C", "90–100"],
+                ["#F3E8FF", "#7C2D8F", "≥100"],
+              ].map(([bg, fg, lbl]) => (
+                <span key={lbl} className="flex items-center gap-1 text-[10px] font-bold" style={{ color: fg }}>
+                  <span className="h-3 w-3 rounded" style={{ background: bg }} />
+                  {lbl}%
+                </span>
+              ))}
+            </div>
+          }
+        />
         <div className="thin-scroll overflow-x-auto p-3">
-          <table className="w-full min-w-[520px] border-separate border-spacing-1">
+          <table className="w-full min-w-[560px] border-separate border-spacing-1">
             <thead>
               <tr>
-                <th className="w-16 text-left text-[10px] font-bold uppercase text-slate-400">Zona</th>
+                <th className="sticky left-0 z-10 bg-white text-left text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Zona ↓ / Gudang →
+                </th>
                 {heat.whs.map((w) => (
-                  <th key={w} className="text-center font-mono-fit text-[10px] font-bold text-slate-500">{w}</th>
+                  <th key={w} className="px-1 text-center">
+                    <div className="font-mono-fit text-[11px] font-extrabold text-slate-600">{w}</div>
+                    <div className="text-[9px] font-semibold text-slate-400">
+                      Ø {fmtInt(heat.colAvg.get(w) || 0)}%
+                    </div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {heat.zones.map((z) => (
-                <tr key={z.zone}>
-                  <td className="font-mono-fit text-[11px] font-bold text-slate-600">{z.zone}</td>
+                <tr key={z.zone} className="group">
+                  <td className="sticky left-0 z-10 bg-white pr-2">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="font-mono-fit text-[11px] font-bold text-slate-700">{z.zone}</span>
+                      <span className="text-[9px] text-slate-400">Ø{fmtInt(z.avg)}%</span>
+                      {z.crit > 0 && (
+                        <span className="rounded-full bg-rose-100 px-1 text-[8px] font-extrabold text-rose-600">
+                          {fmtInt(z.crit)}!
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   {heat.whs.map((w) => {
                     const c = z.m.get(w);
-                    const v = c ? c.s / c.n : null;
-                    return <HeatCell key={w} v={v} n={c?.n || 0} />;
+                    return (
+                      <HeatCell
+                        key={w}
+                        cell={c}
+                        zone={z.zone}
+                        wh={w}
+                        thr={cfg.thresholds}
+                        onClick={() => c && setHeatSel({ zone: z.zone, wh: w })}
+                      />
+                    );
                   })}
                 </tr>
               ))}
             </tbody>
           </table>
           {!heat.zones.length && <p className="py-4 text-center text-xs text-slate-400">Belum cukup data zona.</p>}
+          <p className="mt-2 px-1 text-[10px] text-slate-400">
+            Ø = rata-rata okupansi · angka merah = jumlah SLOC critical/overload · hanya zona dengan ≥2 SLOC, 12 terpadat.
+          </p>
         </div>
       </Card>
+
+      {heatSel && (
+        <HeatDrillModal
+          zone={heatSel.zone}
+          wh={heatSel.wh}
+          rows={(occRows || []).filter((r) => r.zone === heatSel.zone && r.wh === heatSel.wh)}
+          thr={cfg.thresholds}
+          onClose={() => setHeatSel(null)}
+        />
+      )}
 
       {/* ===== Pareto kategori + handling + top kritis ===== */}
       <div className="grid gap-3.5 lg:grid-cols-5">
@@ -343,21 +410,119 @@ function Insight({ dot, text }: { dot: string; text: string }) {
   );
 }
 
-function HeatCell({ v, n }: { v: number | null; n: number }) {
-  if (v === null)
-    return <td className="rounded-md bg-slate-50 py-1.5 text-center text-[10px] text-slate-300">—</td>;
-  const [bg, fg] =
-    v >= 100 ? ["#F3E8FF", "#7C2D8F"]
-    : v >= 90 ? ["#FEE2E2", "#B91C1C"]
-    : v >= 75 ? ["#FEF3C7", "#92400E"]
-    : ["#E7F0FE", "#1D4ED8"];
+type HeatCellData = { pctSum: number; n: number; occ: number; crit: number };
+type Thr = { warning: number; critical: number; overload: number };
+
+function heatColor(v: number, thr: Thr): [string, string] {
+  if (v >= thr.overload) return ["#F3E8FF", "#7C2D8F"];
+  if (v >= thr.critical) return ["#FEE2E2", "#B91C1C"];
+  if (v >= thr.warning) return ["#FEF3C7", "#92400E"];
+  return ["#E7F0FE", "#1D4ED8"];
+}
+
+function HeatCell({
+  cell, zone, wh, thr, onClick,
+}: {
+  cell?: HeatCellData;
+  zone: string;
+  wh: string;
+  thr: Thr;
+  onClick: () => void;
+}) {
+  if (!cell)
+    return (
+      <td className="rounded-md bg-slate-50/70 py-2 text-center text-[10px] text-slate-300" title={`${wh} · ${zone}: tidak ada SLOC terisi`}>
+        —
+      </td>
+    );
+  const v = cell.pctSum / cell.n;
+  const [bg, fg] = heatColor(v, thr);
+  const tip = `${wh} · ${zone}\n${Math.round(v)}% okupansi rata-rata\n${cell.n} SLOC · ${cell.crit} kritis · ${fmtCbm(cell.occ)} terpakai\n(klik untuk rincian)`;
   return (
-    <td
-      className="rounded-md py-1.5 text-center font-mono-fit text-[11px] font-bold"
-      style={{ background: bg, color: fg }}
-      title={`${n} SLOC`}
-    >
-      {Math.round(v)}
+    <td className="p-0">
+      <button
+        onClick={onClick}
+        title={tip}
+        className="relative flex h-11 w-full flex-col items-center justify-center rounded-md font-mono-fit transition-transform hover:z-10 hover:scale-[1.08] hover:ring-2 hover:ring-fit-ink/20 active:scale-95"
+        style={{ background: bg, color: fg }}
+      >
+        <span className="text-[12px] font-extrabold leading-none">{Math.round(v)}</span>
+        <span className="text-[8px] font-semibold leading-tight opacity-70">{fmtInt(cell.n)} SLOC</span>
+        {cell.crit > 0 && (
+          <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-rose-600" />
+        )}
+      </button>
     </td>
+  );
+}
+
+function HeatDrillModal({
+  zone, wh, rows, thr, onClose,
+}: {
+  zone: string;
+  wh: string;
+  rows: OccRow[];
+  thr: Thr;
+  onClose: () => void;
+}) {
+  const sorted = [...rows].sort((a, b) => b.pct - a.pct);
+  const avg = rows.length ? rows.reduce((s, r) => s + r.pct, 0) / rows.length : 0;
+  const occ = rows.reduce((s, r) => s + r.occupied_cbm, 0);
+  const crit = rows.filter((r) => r.status === "CRITICAL" || r.status === "OVERLOAD").length;
+  const [bg, fg] = heatColor(avg, thr);
+
+  return (
+    <Modal open onClose={onClose} title={`${wh} · Zona ${zone}`} wide>
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg px-3 py-2" style={{ background: bg }}>
+            <div className="text-[10px] font-bold uppercase" style={{ color: fg }}>Rata-rata</div>
+            <div className="font-mono-fit text-lg font-extrabold" style={{ color: fg }}>{fmtPct(avg)}</div>
+          </div>
+          <MiniBox label="SLOC terisi" value={fmtInt(rows.length)} />
+          <MiniBox label="Kritis" value={fmtInt(crit)} danger={crit > 0} />
+          <MiniBox label="Volume" value={fmtCbm(occ)} />
+        </div>
+
+        <div className="thin-scroll max-h-80 overflow-auto rounded-lg border border-slate-100">
+          <table className="w-full min-w-[420px] text-left text-xs">
+            <thead className="sticky top-0 bg-slate-50">
+              <tr>
+                <th className="px-2.5 py-2 font-bold text-slate-500">SLOC</th>
+                <th className="px-2.5 py-2 font-bold text-slate-500">Okupansi</th>
+                <th className="px-2.5 py-2 text-right font-bold text-slate-500">Terpakai</th>
+                <th className="px-2.5 py-2 text-center font-bold text-slate-500">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.rack_name} className="border-t border-slate-50">
+                  <td className="px-2.5 py-1.5 font-mono-fit font-bold text-slate-700">{r.rack_name}</td>
+                  <td className="min-w-[130px] px-2.5 py-1.5"><FillMeter pct={r.pct} status={r.status} showLabel /></td>
+                  <td className="px-2.5 py-1.5 text-right font-mono-fit">{fmtCbm(r.occupied_cbm)}</td>
+                  <td className="px-2.5 py-1.5 text-center"><StatusBadge status={r.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <Link
+          href={`/explorer?wh=${encodeURIComponent(wh)}&zone=${encodeURIComponent(zone)}`}
+          className="self-start rounded-lg bg-fit-blue px-3.5 py-1.5 text-xs font-bold text-white shadow-sm transition-transform active:scale-95"
+        >
+          Buka di Explorer →
+        </Link>
+      </div>
+    </Modal>
+  );
+}
+
+function MiniBox({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+  return (
+    <div className={`rounded-lg px-3 py-2 ${danger ? "bg-rose-50" : "bg-slate-50"}`}>
+      <div className={`text-[10px] font-bold uppercase ${danger ? "text-rose-500" : "text-slate-400"}`}>{label}</div>
+      <div className={`font-mono-fit text-lg font-extrabold ${danger ? "text-rose-700" : "text-fit-ink"}`}>{value}</div>
+    </div>
   );
 }
